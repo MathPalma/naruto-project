@@ -1,7 +1,15 @@
 ﻿using Application.Interfaces;
+using Application.Mappers;
+using Application.ViewModels;
+using Azure.Storage.Blobs;
 using Domain.Models;
 using Domain.Repositories;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System;
+using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace Application.Services
@@ -9,35 +17,45 @@ namespace Application.Services
     public class NinjaService : INinjaService
     {
         private readonly INinjaRepository _narutoRepository;
-        
-        public NinjaService(INinjaRepository narutoRepository)
+        private readonly ILogger<NinjaService> _logger;
+        private readonly string _connectionBlobStorage;
+        private readonly string _blobUrl;
+
+        public NinjaService(INinjaRepository narutoRepository, ILogger<NinjaService> logger, IConfiguration configuration)
         {
             _narutoRepository = narutoRepository;
+            _logger = logger;
+            _connectionBlobStorage = configuration.GetConnectionString("BLOB_STORAGE");
+            _blobUrl = configuration["BlobUrl"];
         }
 
-        public async Task AddNinja(NinjaModel ninja)
+        public async Task AddNinja(AddNinjaViewModel AddNinjaViewModel)
         {
             try
             {
-                await _narutoRepository.AddNinja(ninja);
+                NinjaModel ninjaModel = AddNinjaViewModel.ParaModel();
+                ninjaModel.ImageName = await SendImageToBlob(ninjaModel.ImageFile);
+                await _narutoRepository.AddNinja(ninjaModel);
             }
             catch (Exception ex)
             {
-                throw;
+                _logger.LogError(ex, $"NinjaService - Add - Error while adding ninja.");
             }
-            
+
         }
 
-        public async Task UpdateNinja(NinjaModel ninja)
+        public async Task UpdateNinja(AddNinjaViewModel upsertNinjaViewModel)
         {
             try
             {
-                await _narutoRepository.UpdateNinja(ninja);
+                NinjaModel ninjaModel = upsertNinjaViewModel.ParaModel();
+                await DeleteBlobImage(ninjaModel.ImageName);
+                ninjaModel.ImageName = await SendImageToBlob(ninjaModel.ImageFile);
+                await _narutoRepository.UpdateNinja(ninjaModel);
             }
             catch (Exception ex)
             {
-
-                throw;
+                _logger.LogError(ex, $"NinjaService - Update - Error while updating ninja.");
             }
         }
 
@@ -60,6 +78,11 @@ namespace Application.Services
                 var ninjas = await _narutoRepository.FindWithPagedSearch(query);
                 var totalResults = await _narutoRepository.GetCountNinjas(countQuery);
 
+                foreach (NinjaModel ninja in ninjas)
+                {
+                    ninja.ImageSrc = _blobUrl + ninja.ImageName;
+                }
+
                 return new PagedSearchModel
                 {
                     CurrentPage = page,
@@ -69,10 +92,11 @@ namespace Application.Services
                     TotalResults = totalResults
                 };
             }
-            catch (Exception)
+            catch (Exception ex)
             {
 
-                throw;
+                _logger.LogError(ex, $"NinjaService - FindWithPagedSearch - Error while get ninjas by paged search.");
+                return null;
             }
 
         }
@@ -90,18 +114,37 @@ namespace Application.Services
             }
         }
 
-        public async Task DeleteNinja(int id)
+        public async Task DeleteNinja(int id, string imageName)
         {
             try
             {
                 await _narutoRepository.Delete(id);
+                await DeleteBlobImage(imageName);
             }
             catch (Exception ex)
             {
-
-                throw;
+                _logger.LogError(ex, $"NinjaService - Delete - Error while deleting ninja.");
             }
         }
 
+        private async Task<string> SendImageToBlob(IFormFile imageFile)
+        {
+            string imageName = new String(Path.GetFileNameWithoutExtension(imageFile.FileName).Take(10).ToArray()).Replace(' ', '-');
+            imageName = imageName + DateTime.Now.ToString("yymmssfff") + Path.GetExtension(imageFile.FileName);
+            BlobClient blobClient = new BlobClient(_connectionBlobStorage, "naruto-project-photos", imageName);
+
+            using (Stream file = imageFile.OpenReadStream())
+            {
+                await blobClient.UploadAsync(file);
+            }
+
+            return imageName;
+        }
+
+        private async Task DeleteBlobImage(string imageName)
+        {
+            BlobClient blobClient = new BlobClient(_connectionBlobStorage, "naruto-project-photos", imageName);
+            await blobClient.DeleteAsync();
+        }
     }
 }

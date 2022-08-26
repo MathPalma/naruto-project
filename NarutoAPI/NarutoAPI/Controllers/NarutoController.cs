@@ -1,8 +1,10 @@
 ﻿using Application.Interfaces;
+using Application.ViewModels;
 using Domain.Models;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
 using System.Linq;
@@ -15,11 +17,13 @@ namespace NarutoAPI.Controllers
     public class NarutoController : ControllerBase
     {
         private readonly INinjaService _ninjaService;
+        private readonly ILogger<NarutoController> _logger;
         private readonly IWebHostEnvironment _hostEnvironment;
 
-        public NarutoController(INinjaService ninjaService, IWebHostEnvironment hostEnvironment)
+        public NarutoController(INinjaService ninjaService, ILogger<NarutoController> logger, IWebHostEnvironment hostEnvironment)
         {
             _ninjaService = ninjaService;
+            _logger = logger;
             _hostEnvironment = hostEnvironment;
         }
 
@@ -30,11 +34,9 @@ namespace NarutoAPI.Controllers
             int pageSize,
             int page)
         {
+            _logger.LogInformation($"NinjaController - PagedSearch - BEGIN - Sort Direction: {sortDirection}. PageSize: {pageSize}. Page: {page}");
             var pagedSearch = await _ninjaService.FindWithPagedSearch(title, sortDirection, pageSize, page);
-            foreach (NinjaModel ninja in pagedSearch.List)
-            {
-                ninja.ImageSrc = String.Format("{0}://{1}{2}/Images/{3}", Request.Scheme, Request.Host, Request.PathBase, ninja.ImageName);
-            }
+            _logger.LogInformation($"NinjaController - PagedSearch - END - Return: {pagedSearch.List}");
             return Ok(pagedSearch);
         }
 
@@ -47,62 +49,33 @@ namespace NarutoAPI.Controllers
         }
 
         [HttpPost]
-        public async Task<IActionResult> Post([FromForm] NinjaModel ninja)
+        public async Task<IActionResult> Post([FromForm] AddNinjaViewModel addNinjaViewModel)
         {
+            _logger.LogInformation($"NinjaController - Add - BEGIN - ViewModel: {addNinjaViewModel}");
             if (_ninjaService == null) return BadRequest();
-            ninja.ImageName = await SaveImage(ninja.ImageFile);
-            await _ninjaService.AddNinja(ninja);
+            await _ninjaService.AddNinja(addNinjaViewModel);
+            _logger.LogInformation($"NinjaController - Add - END - ViewModel: {addNinjaViewModel}");
             return Ok();
         }
 
         [HttpPut]
-        public async Task<IActionResult> Put([FromForm] NinjaModel ninja)
+        public async Task<IActionResult> Put([FromForm] UpdateNinjaViewModel updateNinjaViewModel)
         {
-            DeleteImage(ninja.ImageName);
-            ninja.ImageName = await SaveImage(ninja.ImageFile);
+            _logger.LogInformation($"NinjaController - Update - BEGIN - ViewModel: {updateNinjaViewModel}");
             if (_ninjaService == null) return BadRequest();
-            await _ninjaService.UpdateNinja(ninja);
+            await _ninjaService.UpdateNinja(updateNinjaViewModel);
+            _logger.LogInformation($"NinjaController - Update - END - ViewModel: {updateNinjaViewModel}");
             return Ok();
         }
 
         [HttpDelete("{id}/{imageName}")]
         public async Task<IActionResult> Delete(int id, string imageName)
         {
-            await _ninjaService.DeleteNinja(id);
-            DeleteImage(imageName);
+            _logger.LogInformation($"NinjaController - Delete - BEGIN - ID: {id}");
+            if (_ninjaService == null) return BadRequest();
+            await _ninjaService.DeleteNinja(id, imageName);
+            _logger.LogInformation($"NinjaController - Delete - END - ID: {id}");
             return NoContent();
         }
-
-        [NonAction]
-        public async Task<string> SaveImage(IFormFile imageFile)
-        {
-            try
-            {
-                string imageName = new String(Path.GetFileNameWithoutExtension(imageFile.FileName).Take(10).ToArray()).Replace(' ', '-');
-                imageName = imageName + DateTime.Now.ToString("yymmssfff") + Path.GetExtension(imageFile.FileName);
-                var imagePath = Path.Combine(_hostEnvironment.ContentRootPath, "Images", imageName);
-                using (var fileStream = new FileStream(imagePath, FileMode.Create))
-                {
-                    await imageFile.CopyToAsync(fileStream);
-                }
-                return imageName;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex);
-                throw;
-            }
-
-        }
-
-        [NonAction]
-        public void DeleteImage(string imageName)
-        {
-            var imagePath = Path.Combine(_hostEnvironment.ContentRootPath, "Images", imageName);
-            if (System.IO.File.Exists(imagePath))
-                System.IO.File.Delete(imagePath);
-        }
-
-
     }
 }

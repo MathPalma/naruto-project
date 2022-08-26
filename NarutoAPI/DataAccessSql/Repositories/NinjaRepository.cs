@@ -33,7 +33,7 @@ namespace DataAccessSql.Repositories
         {
             var parameters = new
             {
-                ID = ninja.ID,
+                ID = ninja.Id,
                 Name = ninja.Name,
                 Rank = ninja.Rank,
                 Village = ninja.Village,
