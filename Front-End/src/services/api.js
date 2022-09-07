@@ -1,7 +1,9 @@
 import axios from 'axios';
+require('dotenv').config();
+
 
 const api = axios.create({
-    baseURL: 'https://localhost:44326',
+    baseURL: process.env.REACT_APP_NARUTO_API,
 })
 
 export default api;
